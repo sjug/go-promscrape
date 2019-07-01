@@ -21,36 +21,55 @@ type TimeSeries struct {
 	Values []float64
 }
 
-func main() {
-	urlFlag := flag.String("url", "http://localhost:9090", "URL for prometheus connection (ie. http://localhost:9090)")
+var insecureTLSFlag bool
+var durationFlag int
+var stepFlag, tokenFlag, urlFlag string
+
+func initFlags() {
+	flag.BoolVar(&insecureTLSFlag, "insecure", false, "Trust self-signed HTTP certificates")
+	flag.IntVar(&durationFlag, "duration", 30, "Duration of test in integer minutes (used to calculate quest start time)")
+	flag.StringVar(&stepFlag, "step", "1m", "Query resolution step width in number of seconds")
+	flag.StringVar(&tokenFlag, "token", "", "Authorization type + token for endpoint")
+	flag.StringVar(&urlFlag, "url", "http://localhost:9090", "URL for prometheus connection")
 	flag.Parse()
+}
 
-	config := api.Config{Address: *urlFlag}
+func main() {
+	initFlags()
 
+	// Check if no flags were passed, print help
+	if flag.NFlag() == 0 {
+		flag.PrintDefaults()
+		return
+	}
+
+	config := api.Config{Address: urlFlag, Authorization: tokenFlag, InsecureTLS: insecureTLSFlag}
 	client, err := api.NewClient(config)
 	if err != nil {
-		fmt.Printf("Client Error %v", err)
+		fmt.Printf("Client Error %v\n", err)
 		return
 	}
 
 	api := v1.NewAPI(client)
-
 	query := "sum by (pod_name) (container_memory_rss{container_name=\"prometheus\"})"
-	start := time.Date(2019, time.May, 14, 0, 0, 0, 0, time.UTC)
-	end := time.Date(2019, time.May, 15, 0, 0, 0, 0, time.UTC)
-	step, _ := time.ParseDuration("1m")
+	end := time.Now()
+	start := end.Add(time.Duration(-1 * durationFlag) * time.Minute)
+	step, err := time.ParseDuration("1m")
+	if err != nil {
+		fmt.Printf("Error parsing step duration %s\n", stepFlag)
+	}
 	r := v1.Range{Start: start, End: end, Step: step}
 
 	queryResult, err := api.QueryRange(context.Background(), query, r)
 	if err != nil {
-		fmt.Printf("Query Error: %v", err)
+		fmt.Printf("Query Error: %v\n", err)
 		return
 	}
 	fmt.Printf("Query returned: %+v\n", queryResult)
 
 	data, ok := queryResult.(model.Matrix)
 	if !ok {
-		fmt.Errorf("Unsupported result format: %s", queryResult.Type().String())
+		fmt.Printf("Unsupported result format: %s\n", queryResult.Type().String())
 		return
 	}
 
